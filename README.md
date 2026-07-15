@@ -34,6 +34,12 @@ This installs the `codebox` binary into your Go bin directory, usually one of:
 
 Make sure that directory is in your `PATH`.
 
+Check the installed version with:
+
+```bash
+codebox --version
+```
+
 ## Run
 
 Start `codebox` from the project directory you want to mount into the container:
@@ -52,7 +58,7 @@ go run .
 
 When you choose `Codex` or `Shell`, `codebox` checks whether the Docker image `codebox-codex:<version>` exists locally.
 
-If the image is missing, `codebox` automatically builds it before starting the container. You do not need to run `docker build` manually.
+Fixed-version images are built when missing and then reused. For `latest`, `codebox` compares the installed Codex version with the latest stable npm release and asks before updating the image. You do not need to run `docker build` manually.
 
 ## Override Codex Image Version
 
@@ -68,7 +74,7 @@ This makes `codebox` use the image:
 codebox-codex:latest
 ```
 
-If that image does not exist yet, it will be built automatically.
+When an update is available for `latest`, `codebox` asks whether to install it. A fixed version, for example `--codex-version 0.1.0`, is built once and reused.
 
 ## Menu
 
@@ -81,12 +87,12 @@ Codebox starting...
 Then it shows an interactive menu:
 
 ```text
-1. Запустить Codex
-2. Примонтировать директорию
-3. Установить скилл
-4. Список скиллов
+1. Run Codex
+2. Mount directory
+3. Install skill
+4. List skills
 5. Shell
-0. Выход
+0. Exit
 ```
 
 ### Menu Actions
@@ -188,7 +194,7 @@ Installing a skill copies a local directory into:
 
 The runtime image currently installs:
 
-- Go toolchain
+- Go toolchain (available as `go` in `PATH`)
 - `gopls`
 - `dlv`
 - `staticcheck`

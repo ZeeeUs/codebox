@@ -63,12 +63,12 @@ func (r Runtime) Run(projectDir string, cfg *config.Config, runner docker.Runner
 }
 
 func (r Runtime) printMenu() {
-	fmt.Fprintln(r.Writer, "1. Запустить Codex")
-	fmt.Fprintln(r.Writer, "2. Примонтировать директорию")
-	fmt.Fprintln(r.Writer, "3. Установить скилл")
-	fmt.Fprintln(r.Writer, "4. Список скиллов")
+	fmt.Fprintln(r.Writer, "1. Run Codex")
+	fmt.Fprintln(r.Writer, "2. Mount directory")
+	fmt.Fprintln(r.Writer, "3. Install skill")
+	fmt.Fprintln(r.Writer, "4. List skills")
 	fmt.Fprintln(r.Writer, "5. Shell")
-	fmt.Fprintln(r.Writer, "0. Выход")
+	fmt.Fprintln(r.Writer, "0. Exit")
 }
 
 func (r Runtime) addMount(projectDir string, cfg *config.Config, scanner *bufio.Scanner) (Action, error) {

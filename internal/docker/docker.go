@@ -1,6 +1,8 @@
 package docker
 
 import (
+	_ "embed"
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -12,38 +14,10 @@ import (
 	"github.com/ZeeeUs/codebox/internal/paths"
 )
 
-const runtimeDockerfile = `FROM golang:1.25-bookworm
+const runtimeVersion = "2"
 
-ENV CGO_ENABLED=1
-ENV PATH="/root/go/bin:${PATH}"
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash \
-    build-essential \
-    ca-certificates \
-    cargo \
-    curl \
-    git \
-    gdb \
-    less \
-    nodejs \
-    npm \
-    procps \
-    rustc \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN go install golang.org/x/tools/gopls@latest \
-    && go install github.com/go-delve/delve/cmd/dlv@latest \
-    && go install honnef.co/go/tools/cmd/staticcheck@latest \
-    && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-RUN npm i -g @openai/codex@latest \
-    && codex --version
-
-WORKDIR /workspace
-
-CMD ["bash"]
-`
+//go:embed runtime.Dockerfile
+var runtimeDockerfile string
 
 type Runner struct {
 	Stdin  *os.File
@@ -99,11 +73,54 @@ func ValidateDocker() error {
 
 func (r Runner) EnsureImage(cfg config.Config) error {
 	image := imageName(cfg)
-	if r.imageExists(image) {
+	if !r.imageExists(image) {
+		fmt.Fprintf(r.Stdout, "Docker image %s not found. Building...\n", image)
+		return r.buildImage(image, cfg.Codex.Version, cfg.Codex.Version == "latest")
+	}
+
+	if !r.runtimeImageCurrent(image) {
+		fmt.Fprintf(r.Stdout, "Docker runtime image %s is outdated. Rebuilding...\n", image)
+		return r.buildImage(image, cfg.Codex.Version, false)
+	}
+
+	if cfg.Codex.Version != "latest" {
 		return nil
 	}
 
-	fmt.Fprintf(r.Stdout, "Docker image %s not found. Building...\n", image)
+	installedVersion, err := r.imageCodexVersion(image)
+	if err != nil {
+		fmt.Fprintf(r.Stderr, "Unable to check installed Codex version: %v\n", err)
+		return nil
+	}
+
+	latestVersion, err := r.latestCodexVersion(image)
+	if err != nil {
+		fmt.Fprintf(r.Stderr, "Unable to check latest Codex version: %v\n", err)
+		return nil
+	}
+
+	if installedVersion == latestVersion {
+		fmt.Fprintf(r.Stdout, "Codex is up to date (%s).\n", installedVersion)
+		return nil
+	}
+
+	fmt.Fprintf(r.Stdout, "Codex update available: %s -> %s. Update? [y/N] ", installedVersion, latestVersion)
+	answer, err := bufio.NewReader(r.Stdin).ReadString('\n')
+	if err != nil && len(answer) == 0 {
+		return nil
+	}
+
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "y", "yes":
+		fmt.Fprintf(r.Stdout, "Updating Docker image %s...\n", image)
+		return r.buildImage(image, latestVersion, false)
+	default:
+		fmt.Fprintln(r.Stdout, "Codex update skipped.")
+		return nil
+	}
+}
+
+func (r Runner) buildImage(image, version string, noCache bool) error {
 	buildDir, err := os.MkdirTemp("", "codebox-docker-build-")
 	if err != nil {
 		return err
@@ -114,11 +131,50 @@ func (r Runner) EnsureImage(cfg config.Config) error {
 		return err
 	}
 
-	cmd := exec.Command("docker", "build", "-t", image, buildDir)
+	args := []string{"build", "--pull"}
+	if noCache {
+		args = append(args, "--no-cache")
+	}
+
+	args = append(
+		args,
+		"--build-arg", "CODEX_VERSION="+version,
+		"-t", image,
+		buildDir,
+	)
+
+	cmd := exec.Command("docker", args...)
 	cmd.Stdin = r.Stdin
 	cmd.Stdout = r.Stdout
 	cmd.Stderr = r.Stderr
 	return cmd.Run()
+}
+
+func (r Runner) imageCodexVersion(image string) (string, error) {
+	return commandVersion("docker", "run", "--rm", image, "codex", "--version")
+}
+
+func (r Runner) latestCodexVersion(image string) (string, error) {
+	return commandVersion("docker", "run", "--rm", image, "npm", "view", "@openai/codex", "version")
+}
+
+func commandVersion(name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("%s: %w", strings.TrimSpace(string(exitErr.Stderr)), err)
+		}
+
+		return "", err
+	}
+
+	fields := strings.Fields(string(output))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("empty version output")
+	}
+
+	return strings.TrimPrefix(fields[len(fields)-1], "v"), nil
 }
 
 func (r Runner) RunContainer(projectDir string, cfg config.Config, command ...string) error {
@@ -160,6 +216,20 @@ func MountTargetForPath(hostPath string) string {
 
 func imageName(cfg config.Config) string {
 	return fmt.Sprintf("codebox-codex:%s", cfg.Codex.Version)
+}
+
+func (r Runner) runtimeImageCurrent(image string) bool {
+	cmd := exec.Command(
+		"docker", "image", "inspect",
+		"--format", "{{ index .Config.Labels \"io.codebox.runtime-version\" }}",
+		image,
+	)
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	return strings.TrimSpace(string(output)) == runtimeVersion
 }
 
 func (r Runner) imageExists(image string) bool {

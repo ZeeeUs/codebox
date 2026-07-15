@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime/debug"
 
 	"github.com/ZeeeUs/codebox/internal/config"
 	"github.com/ZeeeUs/codebox/internal/docker"
@@ -23,16 +24,31 @@ func New(args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) App
 	return App{args: args, stdin: stdin, stdout: stdout, stderr: stderr}
 }
 
-func (a App) Run() error {
-	fmt.Fprintln(a.stdout, "Codebox starting...")
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return "devel"
+	}
 
+	return info.Main.Version
+}
+
+func (a App) Run() error {
 	flags := flag.NewFlagSet("codebox", flag.ContinueOnError)
 	flags.SetOutput(a.stderr)
 
+	showVersion := flags.Bool("version", false, "print codebox version")
 	codexVersion := flags.String("codex-version", "", "override codebox-codex image version")
 	if err := flags.Parse(a.args); err != nil {
 		return err
 	}
+
+	if *showVersion {
+		fmt.Fprintf(a.stdout, "codebox %s\n", buildVersion())
+		return nil
+	}
+
+	fmt.Fprintln(a.stdout, "Codebox starting...")
 
 	projectDir, err := os.Getwd()
 	if err != nil {
