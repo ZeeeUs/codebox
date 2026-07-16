@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"slices"
 	_ "embed"
 	"bufio"
 	"fmt"
@@ -14,7 +15,7 @@ import (
 	"github.com/ZeeeUs/codebox/internal/paths"
 )
 
-const runtimeVersion = "2"
+const runtimeVersion = "6"
 
 //go:embed runtime.Dockerfile
 var runtimeDockerfile string
@@ -75,12 +76,12 @@ func (r Runner) EnsureImage(cfg config.Config) error {
 	image := imageName(cfg)
 	if !r.imageExists(image) {
 		fmt.Fprintf(r.Stdout, "Docker image %s not found. Building...\n", image)
-		return r.buildImage(image, cfg.Codex.Version, cfg.Codex.Version == "latest")
+		return r.buildImage(image, cfg.Codex.Version, cfg.Languages, false)
 	}
 
-	if !r.runtimeImageCurrent(image) {
+	if !r.runtimeImageCurrent(image, cfg.Languages) {
 		fmt.Fprintf(r.Stdout, "Docker runtime image %s is outdated. Rebuilding...\n", image)
-		return r.buildImage(image, cfg.Codex.Version, false)
+		return r.buildImage(image, cfg.Codex.Version, cfg.Languages, false)
 	}
 
 	if cfg.Codex.Version != "latest" {
@@ -113,14 +114,14 @@ func (r Runner) EnsureImage(cfg config.Config) error {
 	switch strings.ToLower(strings.TrimSpace(answer)) {
 	case "y", "yes":
 		fmt.Fprintf(r.Stdout, "Updating Docker image %s...\n", image)
-		return r.buildImage(image, latestVersion, false)
+		return r.buildImage(image, latestVersion, cfg.Languages, false)
 	default:
 		fmt.Fprintln(r.Stdout, "Codex update skipped.")
 		return nil
 	}
 }
 
-func (r Runner) buildImage(image, version string, noCache bool) error {
+func (r Runner) buildImage(image, version string, languages []string, noCache bool) error {
 	buildDir, err := os.MkdirTemp("", "codebox-docker-build-")
 	if err != nil {
 		return err
@@ -139,6 +140,9 @@ func (r Runner) buildImage(image, version string, noCache bool) error {
 	args = append(
 		args,
 		"--build-arg", "CODEX_VERSION="+version,
+		"--build-arg", "LANGUAGE_SET="+strings.Join(languages, ","),
+		"--build-arg", "INSTALL_GO="+languageEnabled(languages, "go"),
+		"--build-arg", "INSTALL_RUST="+languageEnabled(languages, "rust"),
 		"-t", image,
 		buildDir,
 	)
@@ -207,7 +211,13 @@ func (r Runner) Shell(projectDir string, cfg config.Config) error {
 }
 
 func (r Runner) Codex(projectDir string, cfg config.Config) error {
-	return r.RunContainer(projectDir, cfg, "codex")
+	return r.RunContainer(
+		projectDir,
+		cfg,
+		"codex",
+		"--ask-for-approval", cfg.Codex.ApprovalPolicy,
+		"--sandbox", cfg.Codex.SandboxMode,
+	)
 }
 
 func MountTargetForPath(hostPath string) string {
@@ -218,10 +228,10 @@ func imageName(cfg config.Config) string {
 	return fmt.Sprintf("codebox-codex:%s", cfg.Codex.Version)
 }
 
-func (r Runner) runtimeImageCurrent(image string) bool {
+func (r Runner) runtimeImageCurrent(image string, languages []string) bool {
 	cmd := exec.Command(
 		"docker", "image", "inspect",
-		"--format", "{{ index .Config.Labels \"io.codebox.runtime-version\" }}",
+		"--format", "{{ index .Config.Labels \"io.codebox.runtime-version\" }}|{{ index .Config.Labels \"io.codebox.languages\" }}",
 		image,
 	)
 	output, err := cmd.Output()
@@ -229,7 +239,8 @@ func (r Runner) runtimeImageCurrent(image string) bool {
 		return false
 	}
 
-	return strings.TrimSpace(string(output)) == runtimeVersion
+	expected := runtimeVersion + "|" + strings.Join(languages, ",")
+	return strings.TrimSpace(string(output)) == expected
 }
 
 func (r Runner) imageExists(image string) bool {
@@ -237,4 +248,11 @@ func (r Runner) imageExists(image string) bool {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	return cmd.Run() == nil
+}
+
+func languageEnabled(languages []string, wanted string) string {
+	if slices.Contains(languages, wanted) {
+			return "true"
+		}
+	return "false"
 }
