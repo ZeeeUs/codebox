@@ -54,6 +54,15 @@ func (r Runtime) Run(projectDir string, cfg *config.Config, runner docker.Runner
 			if err := runner.Shell(projectDir, *cfg); err != nil {
 				return ActionNone, err
 			}
+		case "6":
+			action, err := r.configureLanguages(projectDir, cfg, scanner)
+			if err != nil || action == ActionRestart {
+				return action, err
+			}
+		case "7":
+			if err := r.configureCodexPermissions(projectDir, cfg, scanner); err != nil {
+				return ActionNone, err
+			}
 		case "0":
 			return ActionExit, nil
 		default:
@@ -68,6 +77,8 @@ func (r Runtime) printMenu() {
 	fmt.Fprintln(r.Writer, "3. Install skill")
 	fmt.Fprintln(r.Writer, "4. List skills")
 	fmt.Fprintln(r.Writer, "5. Shell")
+	fmt.Fprintln(r.Writer, "6. Configure languages")
+	fmt.Fprintln(r.Writer, "7. Codex permissions")
 	fmt.Fprintln(r.Writer, "0. Exit")
 }
 
@@ -134,4 +145,114 @@ func (r Runtime) listSkills() error {
 	}
 
 	return nil
+}
+
+func (r Runtime) configureLanguages(
+	projectDir string,
+	cfg *config.Config,
+	scanner *bufio.Scanner,
+) (Action, error) {
+	selected := append([]string(nil), cfg.Languages...)
+
+	for {
+		fmt.Fprintf(r.Writer, "1. [%s] Go\n", selectionMark(selected, "go"))
+		fmt.Fprintf(r.Writer, "2. [%s] Rust\n", selectionMark(selected, "rust"))
+		fmt.Fprintln(r.Writer, "0. Save")
+		fmt.Fprintln(r.Writer, "b. Back")
+		fmt.Fprint(r.Writer, "> ")
+
+		if !scanner.Scan() {
+			return ActionExit, scanner.Err()
+		}
+
+		switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+		case "1":
+			selected = toggleLanguage(selected, "go")
+		case "2":
+			selected = toggleLanguage(selected, "rust")
+		case "0":
+			cfg.Languages = selected
+			if err := config.Save(projectDir, *cfg); err != nil {
+				return ActionNone, err
+			}
+			fmt.Fprintln(r.Writer, "Languages saved. The runtime will be updated when Codex or Shell starts.")
+			return ActionNone, nil
+		case "b":
+			return ActionNone, nil
+		default:
+			fmt.Fprintln(r.Writer, "Unknown option")
+		}
+	}
+}
+
+func selectionMark(languages []string, wanted string) string {
+	for _, language := range languages {
+		if language == wanted {
+			return "x"
+		}
+	}
+
+	return " "
+}
+
+func toggleLanguage(languages []string, wanted string) []string {
+	for i, language := range languages {
+		if language == wanted {
+			return append(languages[:i], languages[i+1:]...)
+		}
+	}
+
+	return append(languages, wanted)
+}
+
+func (r Runtime) configureCodexPermissions(
+	projectDir string,
+	cfg *config.Config,
+	scanner *bufio.Scanner,
+) error {
+	fmt.Fprintln(r.Writer, "1. Ask when needed (workspace write)")
+	fmt.Fprintln(r.Writer, "2. No prompts (workspace write)")
+	fmt.Fprintln(r.Writer, "3. No prompts (full container access)")
+	fmt.Fprintln(r.Writer, "b. Back")
+	fmt.Fprintf(r.Writer, "Current: %s\n", permissionProfileName(cfg.Codex))
+	fmt.Fprint(r.Writer, "> ")
+
+	if !scanner.Scan() {
+		return scanner.Err()
+	}
+
+	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
+	case "1":
+		cfg.Codex.ApprovalPolicy = "on-request"
+		cfg.Codex.SandboxMode = "workspace-write"
+	case "2":
+		cfg.Codex.ApprovalPolicy = "never"
+		cfg.Codex.SandboxMode = "workspace-write"
+	case "3":
+		cfg.Codex.ApprovalPolicy = "never"
+		cfg.Codex.SandboxMode = "danger-full-access"
+	case "b":
+		return nil
+	default:
+		fmt.Fprintln(r.Writer, "Unknown option")
+		return nil
+	}
+
+	if err := config.Save(projectDir, *cfg); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(r.Writer, "Codex permissions saved: %s\n", permissionProfileName(cfg.Codex))
+	return nil
+}
+
+func permissionProfileName(cfg config.CodexConfig) string {
+	switch {
+	case cfg.ApprovalPolicy == "never" && cfg.SandboxMode == "danger-full-access":
+		return "no prompts, full container access"
+	case cfg.ApprovalPolicy == "never":
+		return "no prompts, workspace write"
+	default:
+		return "ask when needed, workspace write"
+	}
 }

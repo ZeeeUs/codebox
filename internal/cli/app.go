@@ -49,6 +49,7 @@ func (a App) Run() error {
 	}
 
 	fmt.Fprintln(a.stdout, "Codebox starting...")
+	notifyCodeboxUpdate(a.stdout)
 
 	projectDir, err := os.Getwd()
 	if err != nil {

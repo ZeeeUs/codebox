@@ -54,6 +54,10 @@ You can also run it from source during development:
 go run .
 ```
 
+## Codebox Updates
+
+Release builds check the latest GitHub Release at startup. When a newer version is available, Codebox prints the current and new versions together with the `go install` update command. Network or GitHub API errors never prevent Codebox from starting.
+
 ## First Launch Behavior
 
 When you choose `Codex` or `Shell`, `codebox` checks whether the Docker image `codebox-codex:<version>` exists locally.
@@ -92,6 +96,8 @@ Then it shows an interactive menu:
 3. Install skill
 4. List skills
 5. Shell
+6. Configure languages
+7. Codex permissions
 0. Exit
 ```
 
@@ -102,6 +108,8 @@ Then it shows an interactive menu:
 - `3` - install a skill from a local directory into `~/.codebox/skills/`
 - `4` - list installed skills
 - `5` - open `bash` inside the container
+- `6` - select Go, Rust, or both for the runtime image
+- `7` - select the Codex approval and sandbox profile
 - `0` - exit
 
 ## Config File
@@ -115,14 +123,23 @@ If the file does not exist, default config is used.
 - `codex.version = latest`
 - `project.mountPath = /workspace`
 
+### Language toolchains
+
+Language dependencies are opt-in. Use menu option `6` to select Go, Rust, or both. Codebox saves the selection to `.codebox.yaml` and updates the runtime when Codex or Shell starts. Each language has its own Docker layer, so unchanged toolchains are restored from the build cache.
+
 ### Example
 
 ```yaml
 agent: default
 codex:
   version: latest
+  approvalPolicy: on-request
+  sandboxMode: workspace-write
 project:
   mountPath: /workspace
+languages:
+  - go
+  - rust
 mounts:
   - source: ~/work/shared
     target: /mnt/shared
@@ -130,6 +147,16 @@ mounts:
 skills:
   - name: example-skill
 ```
+
+## Codex permissions
+
+Use menu option `7` to choose one of three profiles:
+
+- Ask when needed with workspace-write sandbox.
+- No prompts with workspace-write sandbox; disallowed operations fail automatically.
+- No prompts with full container access.
+
+Full container access also applies to project and additional host directories mounted into the container. Codex can modify or delete files in those mounts without confirmation.
 
 ## Docker Runtime Behavior
 
@@ -189,6 +216,10 @@ Installing a skill copies a local directory into:
 ```text
 ~/.codebox/skills/<name>
 ```
+
+## Runtime dependency versions
+
+Runtime dependencies are pinned and updated together with Codebox releases. Codex is the exception: when `codex.version` is `latest`, Codebox still checks npm for a newer Codex version at launch and asks before rebuilding.
 
 ## Tools Available Inside the Container
 
