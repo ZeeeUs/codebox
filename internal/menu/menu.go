@@ -25,64 +25,72 @@ type Runtime struct {
 	Writer io.Writer
 }
 
+type menuItem struct {
+	label    string
+	selected bool
+}
+
 func (r Runtime) Run(projectDir string, cfg *config.Config, runner docker.Runner) (Action, error) {
-	scanner := bufio.NewScanner(r.Reader)
+	items := []menuItem{
+		{label: "Run Codex"},
+		{label: "Mount directory"},
+		{label: "Install skill"},
+		{label: "List skills"},
+		{label: "Shell"},
+		{label: "Configure languages"},
+		{label: "Codex permissions"},
+		{label: "Exit"},
+	}
 
 	for {
-		r.printMenu()
-		fmt.Fprint(r.Writer, "> ")
-		if !scanner.Scan() {
-			return ActionExit, scanner.Err()
+		choice, back, err := r.selectItem("Codebox", items, false, 0)
+		if err != nil {
+			return ActionExit, err
+		}
+		if back || choice == 7 {
+			return ActionExit, nil
 		}
 
-		switch strings.TrimSpace(scanner.Text()) {
-		case "1":
+		scanner := bufio.NewScanner(r.Reader)
+		switch choice {
+		case 0:
 			if err := runner.Codex(projectDir, *cfg); err != nil {
 				return ActionNone, err
 			}
-		case "2":
-			return r.addMount(projectDir, cfg, scanner)
-		case "3":
+		case 1:
+			return r.addMount(cfg, scanner)
+		case 2:
 			if err := r.installSkill(scanner); err != nil {
 				return ActionNone, err
 			}
-		case "4":
+			if err := r.waitForBack(); err != nil {
+				return ActionNone, err
+			}
+		case 3:
 			if err := r.listSkills(); err != nil {
 				return ActionNone, err
 			}
-		case "5":
+			if err := r.waitForBack(); err != nil {
+				return ActionNone, err
+			}
+		case 4:
 			if err := runner.Shell(projectDir, *cfg); err != nil {
 				return ActionNone, err
 			}
-		case "6":
-			action, err := r.configureLanguages(projectDir, cfg, scanner)
-			if err != nil || action == ActionRestart {
-				return action, err
-			}
-		case "7":
-			if err := r.configureCodexPermissions(projectDir, cfg, scanner); err != nil {
+		case 5:
+			if err := r.configureLanguages(cfg); err != nil {
 				return ActionNone, err
 			}
-		case "0":
-			return ActionExit, nil
-		default:
-			fmt.Fprintln(r.Writer, "Unknown option")
+		case 6:
+			if err := r.configureCodexPermissions(cfg); err != nil {
+				return ActionNone, err
+			}
 		}
 	}
 }
 
-func (r Runtime) printMenu() {
-	fmt.Fprintln(r.Writer, "1. Run Codex")
-	fmt.Fprintln(r.Writer, "2. Mount directory")
-	fmt.Fprintln(r.Writer, "3. Install skill")
-	fmt.Fprintln(r.Writer, "4. List skills")
-	fmt.Fprintln(r.Writer, "5. Shell")
-	fmt.Fprintln(r.Writer, "6. Configure languages")
-	fmt.Fprintln(r.Writer, "7. Codex permissions")
-	fmt.Fprintln(r.Writer, "0. Exit")
-}
-
-func (r Runtime) addMount(projectDir string, cfg *config.Config, scanner *bufio.Scanner) (Action, error) {
+func (r Runtime) addMount(cfg *config.Config, scanner *bufio.Scanner) (Action, error) {
+	r.clear()
 	fmt.Fprint(r.Writer, "Path: ")
 	if !scanner.Scan() {
 		return ActionExit, scanner.Err()
@@ -100,13 +108,8 @@ func (r Runtime) addMount(projectDir string, cfg *config.Config, scanner *bufio.
 		}
 	}
 
-	cfg.Mounts = append(cfg.Mounts, config.Mount{
-		Source: hostPath,
-		Target: target,
-		Mode:   "rw",
-	})
-
-	if err := config.Save(projectDir, *cfg); err != nil {
+	cfg.Mounts = append(cfg.Mounts, config.Mount{Source: hostPath, Target: target, Mode: "rw"})
+	if err := config.Save(*cfg); err != nil {
 		return ActionNone, err
 	}
 
@@ -115,6 +118,7 @@ func (r Runtime) addMount(projectDir string, cfg *config.Config, scanner *bufio.
 }
 
 func (r Runtime) installSkill(scanner *bufio.Scanner) error {
+	r.clear()
 	fmt.Fprint(r.Writer, "Skill path: ")
 	if !scanner.Scan() {
 		return scanner.Err()
@@ -125,134 +129,165 @@ func (r Runtime) installSkill(scanner *bufio.Scanner) error {
 		return err
 	}
 
-	fmt.Fprintf(r.Writer, "Installed skill: %s\n", name)
+	fmt.Fprintf(r.Writer, "Installed skill: %s\n\nPress Esc to go back", name)
 	return nil
 }
 
 func (r Runtime) listSkills() error {
+	r.clear()
 	names, err := skills.List()
 	if err != nil {
 		return err
 	}
-
 	if len(names) == 0 {
 		fmt.Fprintln(r.Writer, "No skills installed")
-		return nil
+	} else {
+		for _, name := range names {
+			fmt.Fprintln(r.Writer, name)
+		}
 	}
-
-	for _, name := range names {
-		fmt.Fprintln(r.Writer, name)
-	}
-
+	fmt.Fprintln(r.Writer, "\nPress Esc to go back")
 	return nil
 }
 
-func (r Runtime) configureLanguages(
-	projectDir string,
-	cfg *config.Config,
-	scanner *bufio.Scanner,
-) (Action, error) {
-	selected := append([]string(nil), cfg.Languages...)
+func (r Runtime) configureLanguages(cfg *config.Config) error {
+	items := []menuItem{
+		{label: "Go", selected: contains(cfg.Languages, "go")},
+		{label: "Rust", selected: contains(cfg.Languages, "rust")},
+		{label: "Save"},
+	}
 
+	cursor := 0
 	for {
-		fmt.Fprintf(r.Writer, "1. [%s] Go\n", selectionMark(selected, "go"))
-		fmt.Fprintf(r.Writer, "2. [%s] Rust\n", selectionMark(selected, "rust"))
-		fmt.Fprintln(r.Writer, "0. Save")
-		fmt.Fprintln(r.Writer, "b. Back")
-		fmt.Fprint(r.Writer, "> ")
-
-		if !scanner.Scan() {
-			return ActionExit, scanner.Err()
+		choice, back, err := r.selectItem("Languages", items, true, cursor)
+		if err != nil || back {
+			return err
+		}
+		if choice < 2 {
+			items[choice].selected = !items[choice].selected
+			cursor = choice
+			continue
 		}
 
-		switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
-		case "1":
-			selected = toggleLanguage(selected, "go")
-		case "2":
-			selected = toggleLanguage(selected, "rust")
-		case "0":
-			cfg.Languages = selected
-			if err := config.Save(projectDir, *cfg); err != nil {
-				return ActionNone, err
+		cfg.Languages = cfg.Languages[:0]
+		for i, language := range []string{"go", "rust"} {
+			if items[i].selected {
+				cfg.Languages = append(cfg.Languages, language)
 			}
-			fmt.Fprintln(r.Writer, "Languages saved. The runtime will be updated when Codex or Shell starts.")
-			return ActionNone, nil
-		case "b":
-			return ActionNone, nil
-		default:
-			fmt.Fprintln(r.Writer, "Unknown option")
 		}
+		return config.Save(*cfg)
 	}
 }
 
-func selectionMark(languages []string, wanted string) string {
-	for _, language := range languages {
-		if language == wanted {
-			return "x"
-		}
+func (r Runtime) configureCodexPermissions(cfg *config.Config) error {
+	items := []menuItem{
+		{label: "Ask when needed (workspace write)"},
+		{label: "No prompts (workspace write)"},
+		{label: "No prompts (full container access)"},
 	}
+	current := permissionProfileIndex(cfg.Codex)
+	items[current].selected = true
 
-	return " "
-}
-
-func toggleLanguage(languages []string, wanted string) []string {
-	for i, language := range languages {
-		if language == wanted {
-			return append(languages[:i], languages[i+1:]...)
-		}
-	}
-
-	return append(languages, wanted)
-}
-
-func (r Runtime) configureCodexPermissions(
-	projectDir string,
-	cfg *config.Config,
-	scanner *bufio.Scanner,
-) error {
-	fmt.Fprintln(r.Writer, "1. Ask when needed (workspace write)")
-	fmt.Fprintln(r.Writer, "2. No prompts (workspace write)")
-	fmt.Fprintln(r.Writer, "3. No prompts (full container access)")
-	fmt.Fprintln(r.Writer, "b. Back")
-	fmt.Fprintf(r.Writer, "Current: %s\n", permissionProfileName(cfg.Codex))
-	fmt.Fprint(r.Writer, "> ")
-
-	if !scanner.Scan() {
-		return scanner.Err()
-	}
-
-	switch strings.ToLower(strings.TrimSpace(scanner.Text())) {
-	case "1":
-		cfg.Codex.ApprovalPolicy = "on-request"
-		cfg.Codex.SandboxMode = "workspace-write"
-	case "2":
-		cfg.Codex.ApprovalPolicy = "never"
-		cfg.Codex.SandboxMode = "workspace-write"
-	case "3":
-		cfg.Codex.ApprovalPolicy = "never"
-		cfg.Codex.SandboxMode = "danger-full-access"
-	case "b":
-		return nil
-	default:
-		fmt.Fprintln(r.Writer, "Unknown option")
-		return nil
-	}
-
-	if err := config.Save(projectDir, *cfg); err != nil {
+	choice, back, err := r.selectItem("Codex permissions", items, true, current)
+	if err != nil || back {
 		return err
 	}
 
-	fmt.Fprintf(r.Writer, "Codex permissions saved: %s\n", permissionProfileName(cfg.Codex))
-	return nil
+	switch choice {
+	case 0:
+		cfg.Codex.ApprovalPolicy = "on-request"
+		cfg.Codex.SandboxMode = "workspace-write"
+	case 1:
+		cfg.Codex.ApprovalPolicy = "never"
+		cfg.Codex.SandboxMode = "workspace-write"
+	case 2:
+		cfg.Codex.ApprovalPolicy = "never"
+		cfg.Codex.SandboxMode = "danger-full-access"
+	}
+	return config.Save(*cfg)
 }
 
-func permissionProfileName(cfg config.CodexConfig) string {
-	switch {
-	case cfg.ApprovalPolicy == "never" && cfg.SandboxMode == "danger-full-access":
-		return "no prompts, full container access"
-	case cfg.ApprovalPolicy == "never":
-		return "no prompts, workspace write"
-	default:
-		return "ask when needed, workspace write"
+func (r Runtime) selectItem(title string, items []menuItem, showMarks bool, cursor int) (int, bool, error) {
+	restore, err := makeRaw(r.Reader)
+	if err != nil {
+		return 0, false, err
 	}
+	defer restore()
+
+	for {
+		r.clear()
+		fmt.Fprintln(r.Writer, title)
+		fmt.Fprintln(r.Writer)
+		for i, item := range items {
+			pointer := "  "
+			if i == cursor {
+				pointer = "> "
+			}
+			mark := ""
+			if showMarks && item.label != "Save" {
+				mark = "[ ] "
+				if item.selected {
+					mark = "[x] "
+				}
+			}
+			fmt.Fprintf(r.Writer, "%s%s%s\n", pointer, mark, item.label)
+		}
+		fmt.Fprintln(r.Writer, "Up/Down move  Space/Enter select  Esc back")
+
+		key, err := readKey(r.Reader)
+		if err != nil {
+			return 0, false, err
+		}
+		switch key {
+		case keyUp:
+			cursor = (cursor - 1 + len(items)) % len(items)
+		case keyDown:
+			cursor = (cursor + 1) % len(items)
+		case keySelect:
+			return cursor, false, nil
+		case keyEscape:
+			return 0, true, nil
+		}
+	}
+}
+
+func (r Runtime) waitForBack() error {
+	restore, err := makeRaw(r.Reader)
+	if err != nil {
+		return err
+	}
+	defer restore()
+
+	for {
+		key, err := readKey(r.Reader)
+		if err != nil {
+			return err
+		}
+		if key == keyEscape || key == keySelect {
+			return nil
+		}
+	}
+}
+
+func (r Runtime) clear() {
+	fmt.Fprint(r.Writer, "\x1b[2J\x1b[H")
+}
+
+func contains(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func permissionProfileIndex(cfg config.CodexConfig) int {
+	if cfg.ApprovalPolicy == "never" && cfg.SandboxMode == "danger-full-access" {
+		return 2
+	}
+	if cfg.ApprovalPolicy == "never" {
+		return 1
+	}
+	return 0
 }

@@ -88,35 +88,24 @@ When started, the application prints:
 Codebox starting...
 ```
 
-Then it shows an interactive menu:
-
-```text
-1. Run Codex
-2. Mount directory
-3. Install skill
-4. List skills
-5. Shell
-6. Configure languages
-7. Codex permissions
-0. Exit
-```
+Then it shows an interactive keyboard menu. Use the arrow keys to move, `Space` or `Enter` to select, and `Esc` to go back.
 
 ### Menu Actions
 
-- `1` - run `codex` inside the container
-- `2` - add an extra mount and save it into `.codebox.yaml`
-- `3` - install a skill from a local directory into `~/.codebox/skills/`
-- `4` - list installed skills
-- `5` - open `bash` inside the container
-- `6` - select Go, Rust, or both for the runtime image
-- `7` - select the Codex approval and sandbox profile
-- `0` - exit
+- Run Codex - run `codex` inside the container
+- Mount directory - add an extra mount and save it into `~/.codebox/config.yaml`
+- Install skill - install a skill from a local directory into `~/.codebox/skills/`
+- List skills - list installed skills
+- Shell - open `bash` inside the container
+- Configure languages - select Go, Rust, or both for the runtime image
+- Codex permissions - select the Codex approval and sandbox profile
+- Exit - close codebox
 
 ## Config File
 
-`codebox` looks for `.codebox.yaml` in the current working directory.
+`codebox` stores its global configuration in `~/.codebox/config.yaml`, regardless of the current project directory.
 
-If the file does not exist, default config is used.
+On first launch, the directory and a config file with default values are created automatically.
 
 ### Default Values
 
@@ -125,7 +114,7 @@ If the file does not exist, default config is used.
 
 ### Language toolchains
 
-Language dependencies are opt-in. Use menu option `6` to select Go, Rust, or both. Codebox saves the selection to `.codebox.yaml` and updates the runtime when Codex or Shell starts. Each language has its own Docker layer, so unchanged toolchains are restored from the build cache.
+Language dependencies are opt-in. Open Configure languages to select Go, Rust, or both. Codebox saves the selection to `~/.codebox/config.yaml` and updates the runtime when Codex or Shell starts. Each language has its own Docker layer, so unchanged toolchains are restored from the build cache.
 
 ### Example
 
@@ -150,7 +139,7 @@ skills:
 
 ## Codex permissions
 
-Use menu option `7` to choose one of three profiles:
+Open Codex permissions to choose one of three profiles:
 
 - Ask when needed with workspace-write sandbox.
 - No prompts with workspace-write sandbox; disallowed operations fail automatically.
@@ -201,7 +190,7 @@ Current behavior:
 - mount mode must be `ro` or `rw`
 - target conflicts are blocked in the interactive mount flow
 
-After adding a mount through the menu, `codebox` saves `.codebox.yaml` and exits so the container can be restarted with the new configuration.
+After adding a mount through the menu, `codebox` saves `~/.codebox/config.yaml` and exits so the container can be restarted with the new configuration.
 
 ## Skills
 

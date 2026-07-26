@@ -56,7 +56,7 @@ func (a App) Run() error {
 		return err
 	}
 
-	cfg, err := config.Load(projectDir)
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
