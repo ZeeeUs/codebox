@@ -4,11 +4,16 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
 
-const FileName = ".codebox.yaml"
+const (
+	DirName  = ".codebox"
+	FileName = "config.yaml"
+)
 
 type Config struct {
 	Agent     string        `yaml:"agent"`
@@ -53,12 +58,29 @@ func Default() Config {
 	}
 }
 
-func Load(dir string) (Config, error) {
-	path := filepath.Join(dir, FileName)
+func Path() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(homeDir, DirName, FileName), nil
+}
+
+func Load() (Config, error) {
+	path, err := Path()
+	if err != nil {
+		return Config{}, err
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return Default(), nil
+			cfg := Default()
+			if err := Save(cfg); err != nil {
+				return Config{}, err
+			}
+
+			return cfg, nil
 		}
 
 		return Config{}, err
@@ -70,18 +92,36 @@ func Load(dir string) (Config, error) {
 	}
 
 	cfg.applyDefaults()
+	if cfg.removeCorruptedMounts() {
+		if err := Save(cfg); err != nil {
+			return Config{}, err
+		}
+	}
+
 	return cfg, nil
 }
 
-func Save(dir string, cfg Config) error {
+func Save(cfg Config) error {
 	cfg.applyDefaults()
+	if err := Validate(cfg); err != nil {
+		return err
+	}
 
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(filepath.Join(dir, FileName), data, 0o644)
+	path, err := Path()
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, data, 0o600)
 }
 
 func Validate(cfg Config) error {
@@ -104,6 +144,10 @@ func Validate(cfg Config) error {
 	}
 
 	for _, mount := range cfg.Mounts {
+		if hasControlCharacter(mount.Source) || hasControlCharacter(mount.Target) {
+			return errors.New("mount source and target must not contain control characters")
+		}
+
 		if mount.Source == "" || mount.Target == "" {
 			return errors.New("mount source and target must not be empty")
 		}
@@ -161,4 +205,22 @@ func (c *Config) applyDefaults() {
 	if c.Skills == nil {
 		c.Skills = []Skill{}
 	}
+}
+
+func (c *Config) removeCorruptedMounts() bool {
+	valid := c.Mounts[:0]
+	for _, mount := range c.Mounts {
+		if hasControlCharacter(mount.Source) || hasControlCharacter(mount.Target) {
+			continue
+		}
+		valid = append(valid, mount)
+	}
+
+	removed := len(valid) != len(c.Mounts)
+	c.Mounts = valid
+	return removed
+}
+
+func hasControlCharacter(value string) bool {
+	return strings.IndexFunc(value, unicode.IsControl) >= 0
 }
