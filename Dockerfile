@@ -11,6 +11,8 @@ RUN if [ "$INSTALL_GO" = "true" ]; then \
       && rm -rf /var/lib/apt/lists/* \
       && curl -fsSL "https://go.dev/dl/go1.26.5.linux-$(dpkg --print-architecture).tar.gz" \
         | tar -C /usr/local -xz \
+      && ln -sf /usr/local/go/bin/go /usr/local/bin/go \
+      && ln -sf /usr/local/go/bin/gofmt /usr/local/bin/gofmt \
       && go version \
       && go install golang.org/x/tools/gopls@v0.23.0 \
       && go install github.com/go-delve/delve/cmd/dlv@v1.26.1 \
